@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Microphone to WebSocket</title>
+    <style>
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #f0f2f5;
+        color: #333;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        width: 100vw;
+        inset: 0;
+      }
+
+      header {
+        width: 100%;
+        background-color: #4a90e2;
+        color: white;
+        padding: 20px 0;
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        margin-bottom: 30px;
+      }
+
+      main {
+        width: 90%;
+        max-width: 800px;
+        background-color: white;
+        padding: 20px 30px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      }
+
+      h1,
+      h2 {
+        text-align: center;
+        color: #4a90e2;
+      }
+
+      #controls,
+      #connection {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      #controls button,
+      #connection button {
+        padding: 10px 20px;
+        font-size: 16px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: background-color 0.3s;
+      }
+
+      #controls button {
+        background-color: #4caf50;
+        color: white;
+      }
+
+      #controls button.stop {
+        background-color: #f44336;
+      }
+
+      #controls button:hover {
+        opacity: 0.9;
+      }
+
+      #connection input {
+        padding: 10px;
+        font-size: 16px;
+        border: 2px solid #ddd;
+        border-radius: 5px;
+        width: 250px;
+        transition: border-color 0.3s;
+      }
+
+      #connection input:focus {
+        border-color: #4a90e2;
+        outline: none;
+      }
+
+      #indicator {
+        display: inline-block;
+        width: 15px;
+        height: 15px;
+        border-radius: 50%;
+        background-color: red;
+        margin-left: 10px;
+        vertical-align: middle;
+        transition: background-color 0.3s;
+      }
+
+      #indicator.active {
+        background-color: green;
+      }
+
+      #audioHistory {
+        margin-top: 20px;
+      }
+
+      .audio-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background-color: #f9f9f9;
+        padding: 10px 15px;
+        border-radius: 5px;
+        margin-bottom: 10px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+
+      .audio-controls {
+        display: flex;
+        gap: 10px;
+      }
+
+      .audio-controls button {
+        padding: 5px 10px;
+        font-size: 14px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: background-color 0.3s;
+      }
+
+      .audio-controls button.play {
+        background-color: #4a90e2;
+        color: white;
+      }
+
+      .audio-controls button.stop-play {
+        background-color: #f44336;
+        color: white;
+      }
+
+      .audio-controls button:hover {
+        opacity: 0.9;
+      }
+
+      @media (max-width: 600px) {
+        #connection input {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>anne webinterface</h1>
+      <p>Connection Status:</p>
+      <p id="connectionStatus">Disconnected</p>
+      <div id="connection">
+        <input
+          type="text"
+          id="wsAddress"
+          placeholder="Enter WebSocket Server Address"
+        />
+        <button id="connectButton">Connect</button>
+      </div>
+
+      <div id="controls">
+        <button id="recordButton">Start Recording</button>
+        <span id="indicator" title="Recording Indicator"></span>
+      </div>
+
+      <h2>Audio History</h2>
+      <div id="audioHistory">
+        <!-- Recorded audio clips will appear here -->
+      </div>
+    </main>
+
+    <script>
+      (async () => {
+        let ws;
+        let audioContext;
+        let mediaStream;
+        let processorNode;
+        let sourceNode;
+        let recording = false;
+        let audioChunks = []; // To store PCM data for history
+        let desiredSampleRate = 16000; // 16 kHz
+        let connectionStatus = document.getElementById("connectionStatus");
+
+        // UI Elements
+        const connectButton = document.getElementById("connectButton");
+        const wsAddressInput = document.getElementById("wsAddress");
+        const recordButton = document.getElementById("recordButton");
+        const indicator = document.getElementById("indicator");
+        const audioHistoryDiv = document.getElementById("audioHistory");
+
+        // Default WebSocket Address
+        let wsAddress = "ws://localhost:1323/ws";
+
+        // Function to initialize WebSocket
+        function initializeWebSocket(address) {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.close();
+          }
+
+          ws = new WebSocket(address);
+
+          ws.addEventListener("open", () => {
+            console.log("WebSocket connected to", address);
+            connectionStatus.textContent = "Connected";
+            // Define user/device/language headers
+            const headers = {
+              "X-User-ID": "0bd27db1-05af-405d-b707-eaa9d85b1623",
+              "X-Device-ID": "1",
+              "X-Language": "en",
+            };
+            ws.send(JSON.stringify(headers));
+          });
+
+          ws.addEventListener("message", (event) => {
+            console.log("Received from server:", event.data);
+            // Handle server responses as needed
+          });
+
+          ws.addEventListener("close", () => {
+            console.log("WebSocket disconnected");
+          });
+
+          ws.addEventListener("error", (err) => {
+            console.error("WebSocket error:", err);
+            alert(
+              "WebSocket connection error. Please check the server address."
+            );
+          });
+        }
+
+        // Initialize with default address
+        initializeWebSocket(wsAddress);
+
+        // Handle Connect Button Click
+        connectButton.addEventListener("click", () => {
+          const address = wsAddressInput.value.trim();
+          if (address) {
+            wsAddress = address;
+            initializeWebSocket(wsAddress);
+          } else {
+            alert("Please enter a valid WebSocket server address.");
+          }
+        });
+
+        async function startRecording() {
+          try {
+            audioContext = new (window.AudioContext ||
+              window.webkitAudioContext)({
+              sampleRate: desiredSampleRate,
+            });
+
+            // Check if the AudioContext was created with the desired sample rate
+            if (audioContext.sampleRate !== desiredSampleRate) {
+              console.warn(
+                `Desired sample rate (${desiredSampleRate} Hz) not supported. Using ${audioContext.sampleRate} Hz instead. Resampling will be performed.`
+              );
+            }
+
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+              audio: true,
+              video: false,
+            });
+            sourceNode = audioContext.createMediaStreamSource(mediaStream);
+
+            // Create a ScriptProcessorNode to capture PCM data
+            // Note: ScriptProcessorNode is deprecated, prefer AudioWorklet in production.
+            // For simplicity here, ScriptProcessorNode is used.
+            processorNode = audioContext.createScriptProcessor(4096, 1, 1);
+
+            processorNode.onaudioprocess = async function (e) {
+              // PCM data is in e.inputBuffer.getChannelData(0)
+              let float32Array = e.inputBuffer.getChannelData(0);
+              let processedBuffer = float32Array;
+
+              // If sample rate is not desiredSampleRate, perform resampling
+              if (audioContext.sampleRate !== desiredSampleRate) {
+                try {
+                  processedBuffer = await resampleBuffer(
+                    float32Array,
+                    audioContext.sampleRate,
+                    desiredSampleRate
+                  );
+                } catch (error) {
+                  console.error("Resampling error:", error);
+                  return;
+                }
+              }
+
+              // Convert Float32 to 16-bit PCM
+              const pcm16 = float32To16BitPCM(processedBuffer);
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(pcm16);
+              }
+              // Store locally for audio history
+              audioChunks.push(new Float32Array(processedBuffer));
+            };
+
+            sourceNode.connect(processorNode);
+            processorNode.connect(audioContext.destination); // you may mute volume or disconnect from destination if you don't want to hear yourself
+            recording = true;
+            updateUI();
+          } catch (err) {
+            console.error("Error starting recording:", err);
+            alert(
+              "Could not start recording. Please check microphone permissions."
+            );
+          }
+        }
+
+        function stopRecording() {
+          if (processorNode && sourceNode) {
+            processorNode.disconnect();
+            sourceNode.disconnect();
+          }
+          if (mediaStream) {
+            mediaStream.getTracks().forEach((track) => track.stop());
+          }
+          if (audioContext) {
+            audioContext.close();
+          }
+          recording = false;
+          updateUI();
+          // Send EOS to let the server know we're done
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send("EOS");
+          }
+
+          // Process and store the recorded audio for history
+          exportWAV(audioChunks, desiredSampleRate)
+            .then((audioBlob) => {
+              addAudioToHistory(audioBlob);
+            })
+            .catch((err) => {
+              console.error("Error exporting WAV:", err);
+              alert("Error processing recorded audio.");
+            });
+          // Reset audioChunks for next recording
+          audioChunks = [];
+        }
+
+        function float32To16BitPCM(float32Array) {
+          const len = float32Array.length;
+          const pcm16 = new Int16Array(len);
+          for (let i = 0; i < len; i++) {
+            let s = Math.max(-1, Math.min(1, float32Array[i]));
+            pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+          }
+          return pcm16;
+        }
+
+        function updateUI() {
+          if (recording) {
+            recordButton.textContent = "Stop Recording";
+            recordButton.classList.add("stop");
+            indicator.classList.add("active");
+          } else {
+            recordButton.textContent = "Start Recording";
+            recordButton.classList.remove("stop");
+            indicator.classList.remove("active");
+          }
+        }
+
+        recordButton.addEventListener("click", async () => {
+          if (!recording) {
+            console.log("Starting recording...");
+            await startRecording();
+          } else {
+            console.log("Stopping recording...");
+            stopRecording();
+          }
+        });
+
+        // Toggle recording on spacebar press
+        document.addEventListener("keydown", async (e) => {
+          if (e.code === "Space") {
+            e.preventDefault();
+            if (!recording) {
+              console.log("Starting recording...");
+              await startRecording();
+            } else {
+              console.log("Stopping recording...");
+              stopRecording();
+            }
+          }
+        });
+
+        // Function to resample the audio buffer to desiredSampleRate
+        async function resampleBuffer(
+          buffer,
+          originalSampleRate,
+          targetSampleRate
+        ) {
+          return new Promise((resolve, reject) => {
+            try {
+              const offlineCtx = new OfflineAudioContext(
+                1,
+                (buffer.length * targetSampleRate) / originalSampleRate,
+                targetSampleRate
+              );
+              const bufferSource = offlineCtx.createBufferSource();
+              const audioBuffer = offlineCtx.createBuffer(
+                1,
+                buffer.length,
+                originalSampleRate
+              );
+              audioBuffer.copyToChannel(buffer, 0, 0);
+              bufferSource.buffer = audioBuffer;
+              bufferSource.connect(offlineCtx.destination);
+              bufferSource.start(0);
+              offlineCtx
+                .startRendering()
+                .then((renderedBuffer) => {
+                  const resampledData = renderedBuffer.getChannelData(0);
+                  resolve(resampledData);
+                })
+                .catch((err) => {
+                  reject(err);
+                });
+            } catch (err) {
+              reject(err);
+            }
+          });
+        }
+
+        // Function to export audioChunks to a WAV Blob
+        async function exportWAV(chunks, sampleRate) {
+          const buffer = flattenArray(chunks);
+          const wavBuffer = encodeWAV(buffer, sampleRate);
+          return new Blob([wavBuffer], { type: "audio/wav" });
+        }
+
+        // Helper function to flatten Float32Array chunks
+        function flattenArray(chunks) {
+          let length = 0;
+          chunks.forEach((chunk) => {
+            length += chunk.length;
+          });
+          const result = new Float32Array(length);
+          let offset = 0;
+          chunks.forEach((chunk) => {
+            result.set(chunk, offset);
+            offset += chunk.length;
+          });
+          return result;
+        }
+
+        // Function to encode WAV format
+        function encodeWAV(samples, sampleRate) {
+          const buffer = new ArrayBuffer(44 + samples.length * 2);
+          const view = new DataView(buffer);
+
+          /* RIFF identifier */
+          writeString(view, 0, "RIFF");
+          /* file length */
+          view.setUint32(4, 36 + samples.length * 2, true);
+          /* RIFF type */
+          writeString(view, 8, "WAVE");
+          /* format chunk identifier */
+          writeString(view, 12, "fmt ");
+          /* format chunk length */
+          view.setUint32(16, 16, true);
+          /* sample format (raw) */
+          view.setUint16(20, 1, true);
+          /* channel count */
+          view.setUint16(22, 1, true);
+          /* sample rate */
+          view.setUint32(24, sampleRate, true);
+          /* byte rate (sample rate * block align) */
+          view.setUint32(28, sampleRate * 2, true);
+          /* block align (channel count * bytes per sample) */
+          view.setUint16(32, 2, true);
+          /* bits per sample */
+          view.setUint16(34, 16, true);
+          /* data chunk identifier */
+          writeString(view, 36, "data");
+          /* data chunk length */
+          view.setUint32(40, samples.length * 2, true);
+
+          // Write the PCM samples
+          floatTo16BitPCM(view, 44, samples);
+
+          return view;
+        }
+
+        function writeString(view, offset, string) {
+          for (let i = 0; i < string.length; i++) {
+            view.setUint8(offset + i, string.charCodeAt(i));
+          }
+        }
+
+        function floatTo16BitPCM(view, offset, samples) {
+          for (let i = 0; i < samples.length; i++, offset += 2) {
+            let s = Math.max(-1, Math.min(1, samples[i]));
+            s = s < 0 ? s * 0x8000 : s * 0x7fff;
+            view.setInt16(offset, s, true);
+          }
+        }
+
+        // Function to add a recorded audio to the history
+        function addAudioToHistory(blob) {
+          const url = URL.createObjectURL(blob);
+          const audioItem = document.createElement("div");
+          audioItem.className = "audio-item";
+
+          const audio = document.createElement("audio");
+          audio.src = url;
+          audio.controls = false;
+
+          const audioName = document.createElement("span");
+          audioName.textContent = new Date().toLocaleString();
+          audioName.style.flex = "1";
+          audioName.style.marginRight = "20px";
+
+          const controlsDiv = document.createElement("div");
+          controlsDiv.className = "audio-controls";
+
+          const playButton = document.createElement("button");
+          playButton.textContent = "Play";
+          playButton.className = "play";
+
+          const stopButton = document.createElement("button");
+          stopButton.textContent = "Stop";
+          stopButton.className = "stop-play";
+          stopButton.disabled = true;
+
+          playButton.addEventListener("click", () => {
+            audio.play();
+            playButton.disabled = true;
+            stopButton.disabled = false;
+          });
+
+          stopButton.addEventListener("click", () => {
+            audio.pause();
+            audio.currentTime = 0;
+            playButton.disabled = false;
+            stopButton.disabled = true;
+          });
+
+          // When playback ends, reset buttons
+          audio.addEventListener("ended", () => {
+            playButton.disabled = false;
+            stopButton.disabled = true;
+          });
+
+          controlsDiv.appendChild(playButton);
+          controlsDiv.appendChild(stopButton);
+
+          audioItem.appendChild(audioName);
+          audioItem.appendChild(controlsDiv);
+          audioItem.appendChild(audio);
+
+          audioHistoryDiv.prepend(audioItem); // Add to the top
+        }
+      })();
+    </script>
+  </body>
+</html>
