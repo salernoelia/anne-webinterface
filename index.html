@@ -31,7 +31,7 @@
 
       main {
         width: 90%;
-        max-width: 800px;
+        max-width: 550px;
         background-color: white;
         padding: 20px 30px;
         border-radius: 8px;
@@ -40,15 +40,15 @@
 
       h1,
       h2 {
-        text-align: center;
+        text-align: left;
         color: #4a90e2;
       }
 
       #controls,
       #connection {
         display: flex;
-        justify-content: center;
-        align-items: center;
+        justify-content: start;
+        align-items: start;
         margin-bottom: 20px;
         flex-wrap: wrap;
         gap: 10px;
@@ -176,9 +176,7 @@
       </div>
 
       <h2>Audio History</h2>
-      <div id="audioHistory">
-        <!-- Recorded audio clips will appear here -->
-      </div>
+      <div id="audioHistory"></div>
     </main>
 
     <script>
@@ -189,21 +187,18 @@
         let processorNode;
         let sourceNode;
         let recording = false;
-        let audioChunks = []; // To store PCM data for history
-        let desiredSampleRate = 16000; // 16 kHz
+        let audioChunks = [];
+        let desiredSampleRate = 16000;
         let connectionStatus = document.getElementById("connectionStatus");
 
-        // UI Elements
         const connectButton = document.getElementById("connectButton");
         const wsAddressInput = document.getElementById("wsAddress");
         const recordButton = document.getElementById("recordButton");
         const indicator = document.getElementById("indicator");
         const audioHistoryDiv = document.getElementById("audioHistory");
 
-        // Default WebSocket Address
         let wsAddress = "ws://localhost:1323/ws";
 
-        // Function to initialize WebSocket
         function initializeWebSocket(address) {
           if (ws && ws.readyState === WebSocket.OPEN) {
             ws.close();
@@ -214,7 +209,6 @@
           ws.addEventListener("open", () => {
             console.log("WebSocket connected to", address);
             connectionStatus.textContent = "Connected";
-            // Define user/device/language headers
             const headers = {
               "X-User-ID": "0bd27db1-05af-405d-b707-eaa9d85b1623",
               "X-Device-ID": "1",
@@ -225,7 +219,6 @@
 
           ws.addEventListener("message", (event) => {
             console.log("Received from server:", event.data);
-            // Handle server responses as needed
           });
 
           ws.addEventListener("close", () => {
@@ -240,10 +233,8 @@
           });
         }
 
-        // Initialize with default address
         initializeWebSocket(wsAddress);
 
-        // Handle Connect Button Click
         connectButton.addEventListener("click", () => {
           const address = wsAddressInput.value.trim();
           if (address) {
@@ -261,7 +252,6 @@
               sampleRate: desiredSampleRate,
             });
 
-            // Check if the AudioContext was created with the desired sample rate
             if (audioContext.sampleRate !== desiredSampleRate) {
               console.warn(
                 `Desired sample rate (${desiredSampleRate} Hz) not supported. Using ${audioContext.sampleRate} Hz instead. Resampling will be performed.`
@@ -274,17 +264,12 @@
             });
             sourceNode = audioContext.createMediaStreamSource(mediaStream);
 
-            // Create a ScriptProcessorNode to capture PCM data
-            // Note: ScriptProcessorNode is deprecated, prefer AudioWorklet in production.
-            // For simplicity here, ScriptProcessorNode is used.
             processorNode = audioContext.createScriptProcessor(4096, 1, 1);
 
             processorNode.onaudioprocess = async function (e) {
-              // PCM data is in e.inputBuffer.getChannelData(0)
               let float32Array = e.inputBuffer.getChannelData(0);
               let processedBuffer = float32Array;
 
-              // If sample rate is not desiredSampleRate, perform resampling
               if (audioContext.sampleRate !== desiredSampleRate) {
                 try {
                   processedBuffer = await resampleBuffer(
@@ -298,17 +283,15 @@
                 }
               }
 
-              // Convert Float32 to 16-bit PCM
               const pcm16 = float32To16BitPCM(processedBuffer);
               if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(pcm16);
               }
-              // Store locally for audio history
               audioChunks.push(new Float32Array(processedBuffer));
             };
 
             sourceNode.connect(processorNode);
-            processorNode.connect(audioContext.destination); // you may mute volume or disconnect from destination if you don't want to hear yourself
+            processorNode.connect(audioContext.destination);
             recording = true;
             updateUI();
           } catch (err) {
@@ -332,12 +315,10 @@
           }
           recording = false;
           updateUI();
-          // Send EOS to let the server know we're done
           if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send("EOS");
           }
 
-          // Process and store the recorded audio for history
           exportWAV(audioChunks, desiredSampleRate)
             .then((audioBlob) => {
               addAudioToHistory(audioBlob);
@@ -346,7 +327,6 @@
               console.error("Error exporting WAV:", err);
               alert("Error processing recorded audio.");
             });
-          // Reset audioChunks for next recording
           audioChunks = [];
         }
 
@@ -382,7 +362,6 @@
           }
         });
 
-        // Toggle recording on spacebar press
         document.addEventListener("keydown", async (e) => {
           if (e.code === "Space") {
             e.preventDefault();
@@ -396,7 +375,6 @@
           }
         });
 
-        // Function to resample the audio buffer to desiredSampleRate
         async function resampleBuffer(
           buffer,
           originalSampleRate,
@@ -434,14 +412,12 @@
           });
         }
 
-        // Function to export audioChunks to a WAV Blob
         async function exportWAV(chunks, sampleRate) {
           const buffer = flattenArray(chunks);
           const wavBuffer = encodeWAV(buffer, sampleRate);
           return new Blob([wavBuffer], { type: "audio/wav" });
         }
 
-        // Helper function to flatten Float32Array chunks
         function flattenArray(chunks) {
           let length = 0;
           chunks.forEach((chunk) => {
@@ -456,39 +432,24 @@
           return result;
         }
 
-        // Function to encode WAV format
         function encodeWAV(samples, sampleRate) {
           const buffer = new ArrayBuffer(44 + samples.length * 2);
           const view = new DataView(buffer);
 
-          /* RIFF identifier */
           writeString(view, 0, "RIFF");
-          /* file length */
           view.setUint32(4, 36 + samples.length * 2, true);
-          /* RIFF type */
           writeString(view, 8, "WAVE");
-          /* format chunk identifier */
           writeString(view, 12, "fmt ");
-          /* format chunk length */
           view.setUint32(16, 16, true);
-          /* sample format (raw) */
           view.setUint16(20, 1, true);
-          /* channel count */
           view.setUint16(22, 1, true);
-          /* sample rate */
           view.setUint32(24, sampleRate, true);
-          /* byte rate (sample rate * block align) */
           view.setUint32(28, sampleRate * 2, true);
-          /* block align (channel count * bytes per sample) */
           view.setUint16(32, 2, true);
-          /* bits per sample */
           view.setUint16(34, 16, true);
-          /* data chunk identifier */
           writeString(view, 36, "data");
-          /* data chunk length */
           view.setUint32(40, samples.length * 2, true);
 
-          // Write the PCM samples
           floatTo16BitPCM(view, 44, samples);
 
           return view;
@@ -508,7 +469,6 @@
           }
         }
 
-        // Function to add a recorded audio to the history
         function addAudioToHistory(blob) {
           const url = URL.createObjectURL(blob);
           const audioItem = document.createElement("div");
@@ -548,7 +508,6 @@
             stopButton.disabled = true;
           });
 
-          // When playback ends, reset buttons
           audio.addEventListener("ended", () => {
             playButton.disabled = false;
             stopButton.disabled = true;
@@ -561,7 +520,7 @@
           audioItem.appendChild(controlsDiv);
           audioItem.appendChild(audio);
 
-          audioHistoryDiv.prepend(audioItem); // Add to the top
+          audioHistoryDiv.prepend(audioItem);
         }
       })();
     </script>
